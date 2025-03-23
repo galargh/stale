@@ -1,13 +1,13 @@
-import {IStateStorage} from '../../interfaces/state/state-storage';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
-import * as core from '@actions/core';
-import {context, getOctokit} from '@actions/github';
-import {retry as octokitRetry} from '@octokit/plugin-retry';
 import * as cache from '@actions/cache';
+import * as core from '@actions/core';
+import { context, getOctokit } from '@actions/github';
+import { retry as octokitRetry } from '@octokit/plugin-retry';
+import * as crypto from 'crypto';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { IStateStorage } from '../../interfaces/state/state-storage';
 
-const CACHE_KEY = '_state';
 const STATE_FILE = 'state.txt';
 const STALE_DIR = '56acbeaa-1fef-4c79-8f84-7565e560fb03';
 
@@ -65,15 +65,29 @@ const resetCacheWithOctokit = async (cacheKey: string): Promise<void> => {
   }
 };
 export class StateCacheStorage implements IStateStorage {
+  #cacheKey: string;
+
+  public constructor() {
+    const id = crypto
+      .createHash('sha256')
+      .update(JSON.stringify({
+        workflow: context.workflow,
+        job: context.job,
+        action: context.action,
+      }))
+      .digest('hex');
+    this.#cacheKey = `_state_${id}`;
+  }
+
   async save(serializedState: string): Promise<void> {
     const tmpDir = mkTempDir();
     const filePath = path.join(tmpDir, STATE_FILE);
     fs.writeFileSync(filePath, serializedState);
 
     try {
-      const cacheExists = await checkIfCacheExists(CACHE_KEY);
+      const cacheExists = await checkIfCacheExists(this.#cacheKey);
       if (cacheExists) {
-        await resetCacheWithOctokit(CACHE_KEY);
+        await resetCacheWithOctokit(this.#cacheKey);
       }
       const fileSize = fs.statSync(filePath).size;
 
@@ -82,7 +96,7 @@ export class StateCacheStorage implements IStateStorage {
         return;
       }
 
-      await cache.saveCache([path.dirname(filePath)], CACHE_KEY);
+      await cache.saveCache([path.dirname(filePath)], this.#cacheKey);
     } catch (error) {
       core.warning(
         `Saving the state was not successful due to "${
@@ -99,7 +113,7 @@ export class StateCacheStorage implements IStateStorage {
     const filePath = path.join(tmpDir, STATE_FILE);
     unlinkSafely(filePath);
     try {
-      const cacheExists = await checkIfCacheExists(CACHE_KEY);
+      const cacheExists = await checkIfCacheExists(this.#cacheKey);
       if (!cacheExists) {
         core.info(
           'The saved state was not found, the process starts from the first issue.'
@@ -107,7 +121,7 @@ export class StateCacheStorage implements IStateStorage {
         return '';
       }
 
-      await cache.restoreCache([path.dirname(filePath)], CACHE_KEY);
+      await cache.restoreCache([path.dirname(filePath)], this.#cacheKey);
 
       if (!fs.existsSync(filePath)) {
         core.warning(

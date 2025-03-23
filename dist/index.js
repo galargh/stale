@@ -1583,19 +1583,31 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __classPrivateFieldSet = (this && this.__classPrivateFieldSet) || function (receiver, state, value, kind, f) {
+    if (kind === "m") throw new TypeError("Private method is not writable");
+    if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a setter");
+    if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot write private member to an object whose class did not declare it");
+    return (kind === "a" ? f.call(receiver, value) : f ? f.value = value : state.set(receiver, value)), value;
+};
+var __classPrivateFieldGet = (this && this.__classPrivateFieldGet) || function (receiver, state, kind, f) {
+    if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a getter");
+    if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot read private member from an object whose class did not declare it");
+    return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
+var _StateCacheStorage_cacheKey;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.StateCacheStorage = void 0;
-const fs_1 = __importDefault(__nccwpck_require__(7147));
-const path_1 = __importDefault(__nccwpck_require__(1017));
-const os_1 = __importDefault(__nccwpck_require__(2037));
+const cache = __importStar(__nccwpck_require__(7799));
 const core = __importStar(__nccwpck_require__(2186));
 const github_1 = __nccwpck_require__(5438);
 const plugin_retry_1 = __nccwpck_require__(6298);
-const cache = __importStar(__nccwpck_require__(7799));
-const CACHE_KEY = '_state';
+const crypto = __importStar(__nccwpck_require__(6113));
+const fs_1 = __importDefault(__nccwpck_require__(7147));
+const os_1 = __importDefault(__nccwpck_require__(2037));
+const path_1 = __importDefault(__nccwpck_require__(1017));
 const STATE_FILE = 'state.txt';
 const STALE_DIR = '56acbeaa-1fef-4c79-8f84-7565e560fb03';
 const mkTempDir = () => {
@@ -1644,22 +1656,34 @@ const resetCacheWithOctokit = (cacheKey) => __awaiter(void 0, void 0, void 0, fu
     }
 });
 class StateCacheStorage {
+    constructor() {
+        _StateCacheStorage_cacheKey.set(this, void 0);
+        const id = crypto
+            .createHash('sha256')
+            .update(JSON.stringify({
+            workflow: github_1.context.workflow,
+            job: github_1.context.job,
+            action: github_1.context.action,
+        }))
+            .digest('hex');
+        __classPrivateFieldSet(this, _StateCacheStorage_cacheKey, `_state_${id}`, "f");
+    }
     save(serializedState) {
         return __awaiter(this, void 0, void 0, function* () {
             const tmpDir = mkTempDir();
             const filePath = path_1.default.join(tmpDir, STATE_FILE);
             fs_1.default.writeFileSync(filePath, serializedState);
             try {
-                const cacheExists = yield checkIfCacheExists(CACHE_KEY);
+                const cacheExists = yield checkIfCacheExists(__classPrivateFieldGet(this, _StateCacheStorage_cacheKey, "f"));
                 if (cacheExists) {
-                    yield resetCacheWithOctokit(CACHE_KEY);
+                    yield resetCacheWithOctokit(__classPrivateFieldGet(this, _StateCacheStorage_cacheKey, "f"));
                 }
                 const fileSize = fs_1.default.statSync(filePath).size;
                 if (fileSize === 0) {
                     core.info(`the state will be removed`);
                     return;
                 }
-                yield cache.saveCache([path_1.default.dirname(filePath)], CACHE_KEY);
+                yield cache.saveCache([path_1.default.dirname(filePath)], __classPrivateFieldGet(this, _StateCacheStorage_cacheKey, "f"));
             }
             catch (error) {
                 core.warning(`Saving the state was not successful due to "${error.message || 'unknown reason'}"`);
@@ -1675,12 +1699,12 @@ class StateCacheStorage {
             const filePath = path_1.default.join(tmpDir, STATE_FILE);
             unlinkSafely(filePath);
             try {
-                const cacheExists = yield checkIfCacheExists(CACHE_KEY);
+                const cacheExists = yield checkIfCacheExists(__classPrivateFieldGet(this, _StateCacheStorage_cacheKey, "f"));
                 if (!cacheExists) {
                     core.info('The saved state was not found, the process starts from the first issue.');
                     return '';
                 }
-                yield cache.restoreCache([path_1.default.dirname(filePath)], CACHE_KEY);
+                yield cache.restoreCache([path_1.default.dirname(filePath)], __classPrivateFieldGet(this, _StateCacheStorage_cacheKey, "f"));
                 if (!fs_1.default.existsSync(filePath)) {
                     core.warning('Unknown error when unpacking the cache, the process starts from the first issue.');
                     return '';
@@ -1697,6 +1721,7 @@ class StateCacheStorage {
     }
 }
 exports.StateCacheStorage = StateCacheStorage;
+_StateCacheStorage_cacheKey = new WeakMap();
 
 
 /***/ }),
