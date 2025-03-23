@@ -33,12 +33,14 @@ const getOctokitClient = () => {
 const checkIfCacheExists = async (cacheKey: string): Promise<boolean> => {
   const client = getOctokitClient();
   try {
-    const issueResult = await client.request(
-      `/repos/${context.repo.owner}/${context.repo.repo}/actions/caches`
+    const caches = await client.paginate(
+      "GET /repos/{owner}/{repo}/actions/caches", {
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        per_page: 100,
+      }
     );
-    const caches: Array<{key?: string}> =
-      issueResult.data['actions_caches'] || [];
-    return Boolean(caches.find(cache => cache['key'] === cacheKey));
+    return Boolean(caches.find(cache => cache.key === cacheKey));
   } catch (error) {
     core.debug(`Error checking if cache exist: ${error.message}`);
   }

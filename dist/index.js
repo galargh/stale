@@ -1630,9 +1630,12 @@ const getOctokitClient = () => {
 const checkIfCacheExists = (cacheKey) => __awaiter(void 0, void 0, void 0, function* () {
     const client = getOctokitClient();
     try {
-        const issueResult = yield client.request(`/repos/${github_1.context.repo.owner}/${github_1.context.repo.repo}/actions/caches`);
-        const caches = issueResult.data['actions_caches'] || [];
-        return Boolean(caches.find(cache => cache['key'] === cacheKey));
+        const caches = yield client.paginate("GET /repos/{owner}/{repo}/actions/caches", {
+            owner: github_1.context.repo.owner,
+            repo: github_1.context.repo.repo,
+            per_page: 100,
+        });
+        return Boolean(caches.find(cache => cache.key === cacheKey));
     }
     catch (error) {
         core.debug(`Error checking if cache exist: ${error.message}`);
