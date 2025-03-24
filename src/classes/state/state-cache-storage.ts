@@ -1,7 +1,6 @@
 import * as cache from '@actions/cache';
 import * as core from '@actions/core';
-import { context, getOctokit } from '@actions/github';
-import { retry as octokitRetry } from '@octokit/plugin-retry';
+import { context } from '@actions/github';
 import * as crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
@@ -25,52 +24,12 @@ const unlinkSafely = (filePath: string) => {
   }
 };
 
-const getOctokitClient = () => {
-  const token = core.getInput('repo-token');
-  return getOctokit(token, undefined, octokitRetry);
-};
-
-const checkIfCacheExists = async (cacheKey: string): Promise<boolean> => {
-  const client = getOctokitClient();
-  try {
-    const caches = await client.paginate(
-      "GET /repos/{owner}/{repo}/actions/caches", {
-        owner: context.repo.owner,
-        repo: context.repo.repo,
-        per_page: 100,
-      }
-    );
-    return Boolean(caches.find(cache => cache.key === cacheKey));
-  } catch (error) {
-    core.debug(`Error checking if cache exist: ${error.message}`);
-  }
-  return false;
-};
-const resetCacheWithOctokit = async (cacheKey: string): Promise<void> => {
-  const client = getOctokitClient();
-  core.debug(`remove cache "${cacheKey}"`);
-  try {
-    // TODO: replace with client.rest.
-    await client.request(
-      `DELETE /repos/${context.repo.owner}/${context.repo.repo}/actions/caches?key=${cacheKey}`
-    );
-  } catch (error) {
-    if (error.status) {
-      core.warning(
-        `Error delete ${cacheKey}: [${error.status}] ${
-          error.message || 'Unknown reason'
-        }`
-      );
-    } else {
-      throw error;
-    }
-  }
-};
 export class StateCacheStorage implements IStateStorage {
-  #cacheKey: string;
+  #restoreCacheKey: string;
+  #saveCacheKey: string;
 
   public constructor() {
-    const id = crypto
+    const fixedId = crypto
       .createHash('sha256')
       .update(JSON.stringify({
         workflow: context.workflow,
@@ -78,7 +37,16 @@ export class StateCacheStorage implements IStateStorage {
         action: context.action,
       }))
       .digest('hex');
-    this.#cacheKey = `_state_${id}`;
+    const variableId = crypto
+    .createHash('sha256')
+    .update(JSON.stringify({
+      runNumber: context.runNumber,
+      // NOTE: @actions/github was not rebuilt after github.runAttempt was added
+      runAttempt: parseInt(process.env.GITHUB_RUN_ATTEMPT as string, 10),
+    }))
+    .digest('hex');
+    this.#restoreCacheKey = `_state_${fixedId}_`;
+    this.#saveCacheKey = `_state_${fixedId}_${variableId}`;
   }
 
   async save(serializedState: string): Promise<void> {
@@ -87,18 +55,7 @@ export class StateCacheStorage implements IStateStorage {
     fs.writeFileSync(filePath, serializedState);
 
     try {
-      const cacheExists = await checkIfCacheExists(this.#cacheKey);
-      if (cacheExists) {
-        await resetCacheWithOctokit(this.#cacheKey);
-      }
-      const fileSize = fs.statSync(filePath).size;
-
-      if (fileSize === 0) {
-        core.info(`the state will be removed`);
-        return;
-      }
-
-      await cache.saveCache([path.dirname(filePath)], this.#cacheKey);
+      await cache.saveCache([path.dirname(filePath)], this.#saveCacheKey);
     } catch (error) {
       core.warning(
         `Saving the state was not successful due to "${
@@ -115,15 +72,7 @@ export class StateCacheStorage implements IStateStorage {
     const filePath = path.join(tmpDir, STATE_FILE);
     unlinkSafely(filePath);
     try {
-      const cacheExists = await checkIfCacheExists(this.#cacheKey);
-      if (!cacheExists) {
-        core.info(
-          'The saved state was not found, the process starts from the first issue.'
-        );
-        return '';
-      }
-
-      await cache.restoreCache([path.dirname(filePath)], this.#cacheKey);
+      await cache.restoreCache([path.dirname(filePath)], this.#restoreCacheKey);
 
       if (!fs.existsSync(filePath)) {
         core.warning(

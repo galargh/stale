@@ -1597,13 +1597,12 @@ var __classPrivateFieldGet = (this && this.__classPrivateFieldGet) || function (
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
-var _StateCacheStorage_cacheKey;
+var _StateCacheStorage_restoreCacheKey, _StateCacheStorage_saveCacheKey;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.StateCacheStorage = void 0;
 const cache = __importStar(__nccwpck_require__(7799));
 const core = __importStar(__nccwpck_require__(2186));
 const github_1 = __nccwpck_require__(5438);
-const plugin_retry_1 = __nccwpck_require__(6298);
 const crypto = __importStar(__nccwpck_require__(6113));
 const fs_1 = __importDefault(__nccwpck_require__(7147));
 const os_1 = __importDefault(__nccwpck_require__(2037));
@@ -1623,45 +1622,11 @@ const unlinkSafely = (filePath) => {
         /* ignore */
     }
 };
-const getOctokitClient = () => {
-    const token = core.getInput('repo-token');
-    return (0, github_1.getOctokit)(token, undefined, plugin_retry_1.retry);
-};
-const checkIfCacheExists = (cacheKey) => __awaiter(void 0, void 0, void 0, function* () {
-    const client = getOctokitClient();
-    try {
-        const caches = yield client.paginate("GET /repos/{owner}/{repo}/actions/caches", {
-            owner: github_1.context.repo.owner,
-            repo: github_1.context.repo.repo,
-            per_page: 100,
-        });
-        return Boolean(caches.find(cache => cache.key === cacheKey));
-    }
-    catch (error) {
-        core.debug(`Error checking if cache exist: ${error.message}`);
-    }
-    return false;
-});
-const resetCacheWithOctokit = (cacheKey) => __awaiter(void 0, void 0, void 0, function* () {
-    const client = getOctokitClient();
-    core.debug(`remove cache "${cacheKey}"`);
-    try {
-        // TODO: replace with client.rest.
-        yield client.request(`DELETE /repos/${github_1.context.repo.owner}/${github_1.context.repo.repo}/actions/caches?key=${cacheKey}`);
-    }
-    catch (error) {
-        if (error.status) {
-            core.warning(`Error delete ${cacheKey}: [${error.status}] ${error.message || 'Unknown reason'}`);
-        }
-        else {
-            throw error;
-        }
-    }
-});
 class StateCacheStorage {
     constructor() {
-        _StateCacheStorage_cacheKey.set(this, void 0);
-        const id = crypto
+        _StateCacheStorage_restoreCacheKey.set(this, void 0);
+        _StateCacheStorage_saveCacheKey.set(this, void 0);
+        const fixedId = crypto
             .createHash('sha256')
             .update(JSON.stringify({
             workflow: github_1.context.workflow,
@@ -1669,7 +1634,16 @@ class StateCacheStorage {
             action: github_1.context.action,
         }))
             .digest('hex');
-        __classPrivateFieldSet(this, _StateCacheStorage_cacheKey, `_state_${id}`, "f");
+        const variableId = crypto
+            .createHash('sha256')
+            .update(JSON.stringify({
+            runNumber: github_1.context.runNumber,
+            // NOTE: @actions/github was not rebuilt after github.runAttempt was added
+            runAttempt: parseInt(process.env.GITHUB_RUN_ATTEMPT, 10),
+        }))
+            .digest('hex');
+        __classPrivateFieldSet(this, _StateCacheStorage_restoreCacheKey, `_state_${fixedId}_`, "f");
+        __classPrivateFieldSet(this, _StateCacheStorage_saveCacheKey, `_state_${fixedId}_${variableId}`, "f");
     }
     save(serializedState) {
         return __awaiter(this, void 0, void 0, function* () {
@@ -1677,16 +1651,7 @@ class StateCacheStorage {
             const filePath = path_1.default.join(tmpDir, STATE_FILE);
             fs_1.default.writeFileSync(filePath, serializedState);
             try {
-                const cacheExists = yield checkIfCacheExists(__classPrivateFieldGet(this, _StateCacheStorage_cacheKey, "f"));
-                if (cacheExists) {
-                    yield resetCacheWithOctokit(__classPrivateFieldGet(this, _StateCacheStorage_cacheKey, "f"));
-                }
-                const fileSize = fs_1.default.statSync(filePath).size;
-                if (fileSize === 0) {
-                    core.info(`the state will be removed`);
-                    return;
-                }
-                yield cache.saveCache([path_1.default.dirname(filePath)], __classPrivateFieldGet(this, _StateCacheStorage_cacheKey, "f"));
+                yield cache.saveCache([path_1.default.dirname(filePath)], __classPrivateFieldGet(this, _StateCacheStorage_saveCacheKey, "f"));
             }
             catch (error) {
                 core.warning(`Saving the state was not successful due to "${error.message || 'unknown reason'}"`);
@@ -1702,12 +1667,7 @@ class StateCacheStorage {
             const filePath = path_1.default.join(tmpDir, STATE_FILE);
             unlinkSafely(filePath);
             try {
-                const cacheExists = yield checkIfCacheExists(__classPrivateFieldGet(this, _StateCacheStorage_cacheKey, "f"));
-                if (!cacheExists) {
-                    core.info('The saved state was not found, the process starts from the first issue.');
-                    return '';
-                }
-                yield cache.restoreCache([path_1.default.dirname(filePath)], __classPrivateFieldGet(this, _StateCacheStorage_cacheKey, "f"));
+                yield cache.restoreCache([path_1.default.dirname(filePath)], __classPrivateFieldGet(this, _StateCacheStorage_restoreCacheKey, "f"));
                 if (!fs_1.default.existsSync(filePath)) {
                     core.warning('Unknown error when unpacking the cache, the process starts from the first issue.');
                     return '';
@@ -1724,7 +1684,7 @@ class StateCacheStorage {
     }
 }
 exports.StateCacheStorage = StateCacheStorage;
-_StateCacheStorage_cacheKey = new WeakMap();
+_StateCacheStorage_restoreCacheKey = new WeakMap(), _StateCacheStorage_saveCacheKey = new WeakMap();
 
 
 /***/ }),
